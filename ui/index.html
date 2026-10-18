@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ECSE3038 · Temperature dashboard</title>
+<!-- Chart.js draws the graph. It downloads from a CDN, so this page needs internet. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root { --teal: #0f766e; --ink: #1f2937; --muted: #6b7280; --line: #e5e7eb; --bad: #b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Segoe UI", sans-serif; color: var(--ink); background: #f8fafc; }
+  header { background: var(--teal); color: white; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 22px; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px; display: grid; gap: 20px; }
+  .card { background: white; border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  label { font-weight: 600; font-size: 14px; display: block; margin-bottom: 6px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .row > div { flex: 1 1 240px; }
+  input, select, button { font: inherit; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%; }
+  button { background: var(--teal); color: white; border: none; cursor: pointer; width: auto; padding: 9px 18px; }
+  .latest { display: flex; gap: 32px; align-items: baseline; flex-wrap: wrap; }
+  .big { font-size: 64px; font-weight: 700; color: var(--teal); line-height: 1; }
+  .muted { color: var(--muted); font-size: 14px; }
+  #status { font-size: 14px; }
+  #status.bad { color: var(--bad); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<header><h1>Temperature dashboard</h1></header>
+<main>
+
+  <section class="card">
+    <div class="row">
+      <div>
+        <label for="api">Your API (from Tutorial 6)</label>
+        <input id="api" placeholder="http://iot-yourname.yourregion.cloudapp.azure.com">
+      </div>
+      <div>
+        <label for="mac">Board (MAC address)</label>
+        <select id="mac"><option value="">Connect first</option></select>
+      </div>
+      <button id="connect">Connect</button>
+    </div>
+    <p id="status" class="muted">Type your API's address and press Connect.</p>
+  </section>
+
+  <section class="card latest">
+    <div>
+      <div class="muted">Latest temperature</div>
+      <div class="big"><span id="latest">--</span> °C</div>
+    </div>
+    <div class="muted">Received at <span id="latest-time">--</span><br>Refreshes every 5 seconds</div>
+  </section>
+
+  <section class="card">
+    <canvas id="chart" height="110"></canvas>
+  </section>
+
+  <section class="card">
+    <table>
+      <thead><tr><th>Time</th><th>Temperature (°C)</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+
+</main>
+
+<script>
+// Every request this page makes is a fetch() to YOUR API, from the browser.
+// The browser only hands the answer to this page if the API says it may
+// (the Access-Control-Allow-Origin header). That rule is CORS.
+
+const apiBox = document.getElementById("api");
+const macBox = document.getElementById("mac");
+const statusLine = document.getElementById("status");
+
+apiBox.value = "http://iot-alliyah.northcentralus.cloudapp.azure.com";
+
+const chart = new Chart(document.getElementById("chart"), {
+  type: "line",
+  data: { labels: [], datasets: [{ label: "°C", data: [], borderColor: "#0f766e", tension: 0.25 }] },
+  options: { animation: false, plugins: { legend: { display: false } } }
+});
+
+function showStatus(text, bad) {
+  statusLine.textContent = text;
+  statusLine.className = bad ? "bad" : "muted";
+}
+
+function apiUrl() {
+  return apiBox.value.trim().replace(/\/+$/, "");   // drop any / at the end
+}
+
+async function getJson(path) {
+  let response;
+  try {
+    response = await fetch(apiUrl() + path);
+  } catch (err) {
+    // fetch() gives no detail here on purpose. The real reason is in the console (F12).
+    throw new Error("No answer the page may read. Press F12, open Console: a 'CORS policy' message means the API needs CORS (Part 4).");
+  }
+  if (!response.ok) {
+    throw new Error(path + " answered " + response.status);
+  }
+  return response.json();
+}
+
+async function loadDevices() {
+  const devices = await getJson("/devices");
+  macBox.innerHTML = "";
+  for (const d of devices) {
+    const option = document.createElement("option");
+    option.value = d.mac;
+    option.textContent = d.mac + (d.name ? "  (" + d.name + ")" : "");
+    macBox.appendChild(option);
+  }
+  if (devices.length === 0) {
+    macBox.innerHTML = '<option value="">No boards registered yet</option>';
+  }
+  const saved = localStorage.getItem("mac");
+  if (saved && devices.some(d => d.mac === saved)) macBox.value = saved;
+}
+
+async function loadReadings() {
+  if (!macBox.value) return;
+  localStorage.setItem("mac", macBox.value);
+  // The API sends the newest first. The chart reads left to right, so flip them.
+  const readings = await getJson("/readings?mac=" + encodeURIComponent(macBox.value) + "&limit=30");
+  const oldestFirst = readings.slice().reverse();
+
+  chart.data.labels = oldestFirst.map(r => new Date(r.time).toLocaleTimeString());
+  chart.data.datasets[0].data = oldestFirst.map(r => r.temp);
+  chart.update();
+
+  document.getElementById("rows").innerHTML = readings
+    .map(r => "<tr><td>" + new Date(r.time).toLocaleString() + "</td><td>" + r.temp + "</td></tr>")
+    .join("");
+
+  if (readings.length > 0) {
+    document.getElementById("latest").textContent = readings[0].temp;
+    document.getElementById("latest-time").textContent = new Date(readings[0].time).toLocaleTimeString();
+    showStatus("Connected. " + readings.length + " readings shown.", false);
+  } else {
+    showStatus("Connected, but this board has no readings yet.", false);
+  }
+}
+
+async function refresh() {
+  try {
+    await loadReadings();
+  } catch (err) {
+    showStatus(err.message, true);
+  }
+}
+
+document.getElementById("connect").addEventListener("click", async () => {
+  localStorage.setItem("api-url", apiUrl());
+  showStatus("Connecting...", false);
+  try {
+    await loadDevices();
+    await loadReadings();
+  } catch (err) {
+    showStatus(err.message, true);
+  }
+});
+
+macBox.addEventListener("change", refresh);
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

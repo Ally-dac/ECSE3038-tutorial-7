@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "author": "ECSE3038",
+  "editor": "wokwi",
+  "parts":  [
+  { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+  { "type": "wokwi-dht22", "id": "dht1", "top": -10, "left": 160, "attrs": { "temperature": "28.5", "humidity": "60" } }
+],
+  "connections": [
+  [ "esp:TX", "$serialMonitor:RX", "", [] ],
+  [ "esp:RX", "$serialMonitor:TX", "", [] ],
+  [ "dht1:VCC", "esp:3V3", "red", [] ],
+  [ "dht1:SDA", "esp:15", "green", [] ],
+  [ "dht1:GND", "esp:GND.2", "black", [] ]
+],
+  "dependencies": {}
+}
